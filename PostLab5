@@ -1,0 +1,304 @@
+; Archivo: POSTLAB_5
+; Dispositivo: PIC16F887
+; Autor: Johann Haeussler 21223
+; Compilador: pic-a (v2.30), MPLABX V5.40
+;
+; Programa: Contador de 8 bits reflejado en Display
+; Hardware: Push, LEDs, Displays
+;
+; Creado: 24 de febero, 2022
+; Última modificación: 
+Processor 16F887
+
+ 
+#include <xc.inc>
+    
+  CONFIG FOSC=INTRC_NOCLKOUT	//oscilador interno
+  CONFIG WDTE=OFF   // WDT disabled (reinicio repetitivo de pic)
+  CONFIG PWRTE=OFF   // PWRT enabled (espera de 72ms al iniciar)
+  CONFIG MCLRE=OFF  // El pin de MCLR se utiliza como I/O
+  CONFIG CP=OFF    //Sin protección de código
+  CONFIG CPD=OFF   //Sin protección de datos
+  
+  CONFIG BOREN=OFF  // Sin reinicio cuando el voltaje de alimentación baja de 4V
+  CONFIG IESO=OFF   //Reinicio sin cambio de reloj de interno a externo
+  CONFIG FCMEN=OFF  //Cambio de reloj externo a interno en caso de fallo
+  CONFIG LVP=OFF	    //programación en bajo voltaje permitida
+;----------------
+  
+UP EQU 0
+DOWN EQU 1
+PSECT udata_bank0
+    CONTA:	DS 1
+    CENTENA:	DS 1
+    DECENA:	DS 1
+    UNIDADES:	DS 1
+    BANDERADISP:DS 1
+    DISPLAY:	DS 3
+  
+;-------------------------------------------------------------------------------
+ ;				   MACROS
+ ;-------------------------------------------------------------------------------
+RESETTIMER0 MACRO
+    BANKSEL TMR0
+    MOVLW   217
+    BCF	    T0IF
+    ENDM
+    
+;-------------------------------------------------------------------------------
+;				STATUS PARA INTERRUPCIONES
+;-------------------------------------------------------------------------------
+PSECT  udata_shr
+    WTEMP:	DS 1
+    STATUSTEMP: DS 1
+    
+PSECT resVect, class = CODE, abs, delta = 2
+
+;-------------------------------------------------------------------------------
+;				  VECTOR RESET
+;-------------------------------------------------------------------------------
+ORG 00h
+resVect: 
+    PAGESEL	main
+    GOTO	main
+    
+PSECT intVect, class = CODE, abs, delta = 2
+;-------------------------------------------------------------------------------
+;				VECTOR INTERRUPCION
+;-------------------------------------------------------------------------------
+ORG 04h
+PUSH:
+    MOVWF   WTEMP
+    SWAPF   STATUS,W
+    MOVWF   STATUSTEMP
+ISR:
+    BTFSC   RBIF
+    CALL    INTERRUPIOCB
+    BANKSEL PORTA
+    BTFSC   T0IF
+    CALL    INT_TMR0
+    
+POP:
+    SWAPF   STATUSTEMP, W
+    MOVWF   STATUS
+    SWAPF   WTEMP, F
+    SWAPF   WTEMP, W
+    RETFIE
+   
+;-------------------------------------------------------------------------------
+ ;				    CONFIGURACION
+ ;-------------------------------------------------------------------------------
+ORG 100h
+main:
+    CALL    CONFIGIO
+    CALL    CONFIGRELOJ
+    CALL    CONFIGTIMER0
+    CALL    CONFIGINTERRUP
+    CALL    CONFIIOCB
+    BANKSEL PORTA
+    
+    
+loop:
+    CALL    VALOR_DEC
+    CALL    OBTENER_CENTENAS
+    GOTO    loop
+    
+CONFIGRELOJ:
+    BANKSEL OSCCON
+    BSF	    OSCCON, 0
+    BSF	    OSCCON, 6
+    BSF	    OSCCON, 5
+    BCF	    OSCCON, 4
+    RETURN
+   
+CONFIGTIMER0:
+    BANKSEL OPTION_REG
+    BCF	    OPTION_REG, 5
+    BCF	    OPTION_REG, 3
+    BSF	    OPTION_REG, 2
+    BSF	    OPTION_REG, 1
+    BSF	    OPTION_REG, 0
+    
+    RESETTIMER0
+    
+    RETURN
+    
+CONFIGIO:
+    BANKSEL ANSEL
+    CLRF    ANSEL
+    CLRF    ANSELH
+    
+    BANKSEL TRISA
+    BSF	    TRISB, UP
+    BSF	    TRISB, DOWN
+    
+    CLRF    TRISA
+    CLRF    TRISC
+    CLRF    TRISD
+    
+    BCF	    OPTION_REG, 7
+    BSF	    WPUB, UP
+    BSF	    WPUB, DOWN
+    
+    BANKSEL PORTA
+    CLRF    PORTA
+    CLRF    PORTB
+    CLRF    PORTC
+    CLRF    PORTD
+    CLRF    CENTENA
+    CLRF    DECENA
+    CLRF    UNIDADES
+    CLRF    BANDERADISP
+    
+    RETURN
+
+
+CONFIGINTERRUP:
+    BANKSEL INTCON
+    BSF	    GIE
+    BSF	    RBIE
+    BCF	    RBIF
+    BSF	    T0IE
+    BCF	    T0IF
+    return
+    
+CONFIIOCB:
+    BANKSEL TRISA
+    BSF	    IOCB, UP
+    BSF	    IOCB, DOWN
+    
+    BANKSEL PORTA
+    MOVF    PORTB,W
+    BCF	    RBIF
+    
+    RETURN
+    
+INTERRUPIOCB:
+    BANKSEL PORTA
+    BTFSS   PORTB, UP
+    INCF    PORTA
+    BTFSS   PORTB, DOWN
+    DECF    PORTA
+    BCF	    RBIF
+    
+    RETURN
+
+INT_TMR0:
+    RESETTIMER0
+    CALL MOSTRAR_VALORDEC
+    RETURN
+
+VALOR_DEC:
+    MOVF    UNIDADES,W
+    CALL    TABLA
+    MOVWF   DISPLAY
+    
+    MOVF    DECENA,W
+    CALL    TABLA
+    MOVWF   DISPLAY+1
+    
+    MOVF    CENTENA,W
+    CALL    TABLA
+    MOVWF   DISPLAY+2
+    RETURN
+
+MOSTRAR_VALORDEC:
+    BCF	    PORTD,0
+    BCF	    PORTD,1
+    BCF	    PORTD,2
+    BTFSC   BANDERADISP,0
+    GOTO    DISPLAY3
+    BTFSC   BANDERADISP,1
+    GOTO    DISPLAY2
+    BTFSC   BANDERADISP,2
+    GOTO    DISPLAY1
+    
+DISPLAY1:
+    MOVF    DISPLAY,W
+    MOVWF   PORTC
+    BSF	    PORTD, 2
+    BCF	    BANDERADISP,2
+    BSF	    BANDERADISP,1
+    RETURN
+
+DISPLAY2:
+    MOVF    DISPLAY+1,W
+    MOVWF   PORTC
+    BSF	    PORTD, 1
+    BCF	    BANDERADISP,1
+    BSF	    BANDERADISP,0
+    RETURN
+
+DISPLAY3:
+    MOVF    DISPLAY+2,W
+    MOVWF   PORTC
+    BSF	    PORTD, 0
+    BCF	    BANDERADISP,0
+    BSF	    BANDERADISP,2
+    RETURN
+
+OBTENER_CENTENAS:
+    CLRF    CENTENA
+    CLRF    DECENA
+    CLRF    UNIDADES
+    MOVF    PORTA,W
+    MOVWF   CONTA
+    MOVLW   100
+    SUBWF   CONTA, F
+    INCF    CENTENA
+    BTFSC   STATUS, 0
+    GOTO    $-4
+    DECF    CENTENA
+    MOVLW   100
+    ADDWF   CONTA, F
+    CALL    OBTENER_DECENAS
+    RETURN
+
+OBTENER_DECENAS:
+    MOVLW   10
+    SUBWF   CONTA,F
+    INCF    DECENA
+    BTFSC   STATUS,0
+    GOTO    $-4
+    DECF    DECENA
+    MOVLW   10
+    ADDWF   CONTA, F
+    CALL    OBTENER_UNIDADES
+    RETURN
+
+OBTENER_UNIDADES:
+    MOVLW   1
+    SUBWF   CONTA, F
+    INCF    UNIDADES
+    BTFSC   STATUS, 0
+    GOTO    $-4
+    DECF    UNIDADES
+    MOVLW   1
+    ADDWF   CONTA, F
+    RETURN
+
+;-------------------------------------------------------------------------------
+ ;				    INDICE DISPLAY
+ ;-------------------------------------------------------------------------------
+PSECT TABLA, class = code, delta=2, abs
+ORG 200h    ; posición para el código
+
+;------------------------------------------------
+TABLA:
+ clrf    PCLATH
+ bsf	 PCLATH, 1          ; 
+ andlw	 0x0f
+ addwf   PCL		    ; El valor del PC se suma con lo que haya en w para
+ retlw   00111111B	    ; 0	    
+ retlw   00000110B	    ; 1	    
+ retlw   01011011B	    ; 2	    
+ retlw   01001111B	    ; 3	    
+ retlw   01100110B	    ; 4	    
+ retlw   01101101B	    ; 5	    
+ retlw   01111101B	    ; 6
+ retlw   00000111B	    ; 7
+ retlw   01111111B	    ; 8
+ retlw   01100111B	    ; 9
+
+
+END
